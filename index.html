@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14151a" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Glass Studio">
+<meta name="description" content="Stained glass from a photo: take a picture, divide it into regions, and match each area to the best glass color. Numbered pieces, shopping list, full-size print. Offline, no account.">
+<title>Glass Pattern Studio — Stained glass from a photo</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="bar" id="bar">
+  <button class="icon-btn" id="btnHome" aria-label="My projects" hidden>‹</button>
+  <h1 id="title">Glass Pattern Studio</h1>
+  <button class="icon-btn" id="btnHelp" aria-label="Beginner guide">?</button>
+</header>
+<nav class="steps" id="steps" aria-label="Steps" hidden>
+  <button data-step="home"><i>1</i><span>Photo</span></button>
+  <button data-step="crop"><i>2</i><span>Size</span></button>
+  <button data-step="pattern"><i>3</i><span>Convert</span></button>
+  <button data-step="glass"><i>4</i><span>Glass</span></button>
+  <button data-step="print"><i>5</i><span>Print</span></button>
+</nav>
+
+<main id="main">
+  <!-- HOME / step 1: pick or take a photo -->
+  <section id="v-home" class="view">
+    <div class="hero card">
+      <p class="eyebrow">Stained glass from a photo</p>
+      <h2>Photo → regions → glass colors</h2>
+      <p class="muted">Take or choose a picture. The app divides it into cuttable regions, then matches each region to the best stained-glass color from a real glass palette.</p>
+      <ol class="flow-steps" aria-label="How it works">
+        <li><b>1. Photo</b><span>Take or pick one</span></li>
+        <li><b>2. Regions</b><span>Edges become pieces</span></li>
+        <li><b>3. Glass</b><span>Best-match colors</span></li>
+      </ol>
+      <div class="big-actions">
+        <label class="primary big" role="button" tabindex="0"><input type="file" accept="image/*" capture="environment" id="fileCam" hidden>📷 Take a photo</label>
+        <label class="secondary big" role="button" tabindex="0"><input type="file" accept="image/*" id="fileLib" hidden>🖼️ Choose a photo</label>
+      </div>
+      <p class="small muted" style="margin:14px 0 6px">Or try a sample</p>
+      <div class="samples" id="samples"></div>
+    </div>
+    <div class="card">
+      <div class="row between"><h3>My projects</h3><span class="small muted" id="projCount"></span></div>
+      <div class="projects" id="projects"></div>
+    </div>
+    <p class="small muted center foot">No account · no AI key · works offline · <button class="link" id="btnAbout">About</button></p>
+  </section>
+
+  <!-- step 2: crop and size -->
+  <section id="v-crop" class="view" hidden>
+    <div class="card">
+      <div class="crop-stage" id="cropStage"><img id="cropImg" alt="Your photo" draggable="false"><div class="crop-box" id="cropBox"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div></div>
+      <p class="small muted center" style="margin:6px 0 0">Drag the box to choose what goes in the panel. Drag a corner to zoom.</p>
+    </div>
+    <div class="card">
+      <div class="row between"><h3>Panel size</h3><div class="seg mini" role="group" aria-label="Units"><button data-unit="in">in</button><button data-unit="cm">cm</button></div></div>
+      <div class="chips" id="sizeChips"></div>
+      <div class="row gap size-row">
+        <label class="num"><span>Width</span><input type="number" id="inW" inputmode="decimal" min="3" step="0.5"></label>
+        <button class="icon-btn swap" id="btnRotate" aria-label="Swap width and height">⇄</button>
+        <label class="num"><span>Height</span><input type="number" id="inH" inputmode="decimal" min="3" step="0.5"></label>
+        <b class="unit" id="unitL">in</b>
+      </div>
+      <label class="toggle"><input type="checkbox" id="frameOn"> <span>Glass border around the edge <small class="muted" id="frameNote"></small></span></label>
+    </div>
+  </section>
+
+  <!-- step 3: pattern / convert -->
+  <section id="v-pattern" class="view" hidden>
+    <div class="card pattern-card">
+      <p class="convert-line" id="convertLine" aria-label="Conversion progress"><span data-ph="photo">Photo</span><i>·</i><span data-ph="regions">Regions</span><i>·</i><span data-ph="glass">Glass</span></p>
+      <div class="preview" id="prev" role="img" aria-label="Pattern preview"></div>
+      <div class="glass-legend" id="glassLegend" hidden></div>
+      <div class="chips views" id="viewChips" role="group" aria-label="View"></div>
+      <label class="field" id="opWrap" hidden><span>Pattern over photo</span><input type="range" id="op" min="0" max="100" step="5" value="50"></label>
+      <p class="sum" id="sum"></p>
+    </div>
+    <div class="card">
+      <label class="field"><span class="row between"><span>Glass colors <b id="colV"></b></span><span class="small muted">How many glass sheets to match</span></span>
+        <input type="range" id="col" min="4" max="24" step="1"><span class="ends small muted"><span>fewer colors</span><span>more colors</span></span></label>
+      <details class="more" id="moreOpts"><summary>More — detail, tools &amp; lines</summary>
+        <label class="field"><span class="row between"><span>Detail <b id="detV"></b></span><span class="pro-note small" id="detPro" hidden><span class="pro">PRO</span> high detail</span></span>
+          <input type="range" id="det" min="1" max="10" step="1"><span class="ends small muted"><span>fewer, bigger pieces</span><span>more detail <span class="pro">PRO 9–10</span></span></span></label>
+        <div class="field"><span>Tools you have</span><div class="seg" id="toolSeg" role="group" aria-label="Tools"></div><p class="small muted" id="toolNote"></p></div>
+        <div class="field"><span>How pieces are joined</span><div class="seg" id="lineSeg" role="group" aria-label="Joining method"></div></div>
+        <div class="field"><span>Line width</span><div class="seg" id="lwSeg" role="group" aria-label="Line width"></div></div>
+        <div class="field"><label class="toggle"><input type="checkbox" id="paintOn"> <span>Paint lines <small class="muted">— eyes, feathers, veins too small to cut</small></span></label>
+          <div class="seg" id="paintSeg" role="group" aria-label="Paint amount"></div></div>
+      </details>
+    </div>
+  </section>
+
+  <!-- step 4: glass & materials -->
+  <section id="v-glass" class="view" hidden>
+    <div class="card">
+      <h3>Matched glass to buy</h3>
+      <p class="small muted" id="glassIntro">Each color is the closest named glass from the palette to the average color in that region of your photo.</p>
+      <div class="row gap wrap ctl-row">
+        <label class="sel"><span>Sheet size</span><select id="sheetSel"></select></label>
+        <div class="field" style="flex:1 1 100%"><span>Extra for waste</span><div class="seg" id="wasteSeg" role="group" aria-label="Waste allowance"></div></div>
+      </div>
+      <div id="glassList" class="glass-list"></div>
+    </div>
+    <div class="card" id="matCard"></div>
+    <details class="card more"><summary>How these numbers are worked out</summary><div id="assume" class="small"></div></details>
+  </section>
+
+  <!-- step 5: print & export -->
+  <section id="v-print" class="view" hidden>
+    <div class="card">
+      <div class="row between"><h3>Print at full size</h3><div class="seg mini" role="group" aria-label="Paper"><button data-paper="letter">Letter</button><button data-paper="a4">A4</button></div></div>
+      <div class="tilemap" id="tileMap"></div>
+      <p class="small" id="tileNote"></p>
+      <div class="exports">
+        <button class="export" data-exp="full"><b>⤓ Full-size cut pattern</b><span>Numbered cut lines at real size, tiled with alignment marks <span class="pro">PRO</span></span></button>
+        <button class="export" data-exp="paint"><b>⤓ Full-size paint guide</b><span>Dashed paint lines to trace onto each piece <span class="pro">PRO</span></span></button>
+        <button class="export" data-exp="sheet"><b>⤓ Numbered cut sheet</b><span>One-page color map + piece list by glass color</span></button>
+        <button class="export" data-exp="svg"><b>⤓ SVG (real size)</b><span>For Cricut, plotters and drawing apps <span class="pro">PRO</span></span></button>
+        <button class="export" data-exp="png"><b>⤓ Picture (PNG)</b><span>Color preview to share</span></button>
+        <button class="export" data-exp="list"><b>⤓ Shopping list</b><span>Glass, foil or came — as text</span></button>
+      </div>
+      <p class="small muted">Print at <b>100% / Actual size</b> (not “Fit to page”), then measure the check square on any page — it must be exactly 1 inch. </p>
+    </div>
+  </section>
+</main>
+
+<footer class="nav" id="nav" hidden>
+  <button class="secondary" id="btnBack">‹ Back</button>
+  <button class="primary" id="btnNext">Next ›</button>
+</footer>
+
+<div class="sheet-bg" id="sheetBg" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden><div class="sheet-body" id="sheetBody"></div></div>
+<div class="toast" id="toast" hidden role="status"><span id="toastText"></span><button class="link" id="toastUndo" hidden>Undo</button></div>
+
+<script src="pdf.js"></script>
+<script src="glass.js"></script>
+<script src="tracer.js"></script>
+<script src="db.js"></script>
+<script src="materials.js"></script>
+<script src="print.js"></script>
+<script src="guide.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

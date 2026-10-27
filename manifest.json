@@ -1,0 +1,17 @@
+{
+  "name": "Glass Pattern Studio",
+  "short_name": "Glass Studio",
+  "description": "Stained glass from a photo: divide into regions, match best glass colors, shopping list and full-size print. Works offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14151a",
+  "theme_color": "#b8471f",
+  "icons": [
+    {"src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png"},
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

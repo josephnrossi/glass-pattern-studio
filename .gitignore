@@ -1,0 +1,5 @@
+shots/
+*.tgz
+.DS_Store
+node_modules/
+.tmp/
