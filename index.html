@@ -86,12 +86,14 @@
       <label class="field" id="opWrap" hidden><span>Pattern over photo</span><input type="range" id="op" min="0" max="100" step="5" value="50"></label>
       <p class="sum" id="sum"></p>
     </div>
-    <div class="card">
-      <label class="field"><span class="row between"><span>Glass colors <b id="colV"></b></span><span class="small muted">How many glass sheets to match</span></span>
-        <input type="range" id="col" min="4" max="24" step="1"><span class="ends small muted"><span>fewer colors</span><span>more colors</span></span></label>
-      <details class="more" id="moreOpts"><summary>More — detail, tools &amp; lines</summary>
-        <label class="field"><span class="row between"><span>Detail <b id="detV"></b></span><span class="pro-note small" id="detPro" hidden><span class="pro">PRO</span> high detail</span></span>
-          <input type="range" id="det" min="1" max="10" step="1"><span class="ends small muted"><span>fewer, bigger pieces</span><span>more detail <span class="pro">PRO 9–10</span></span></span></label>
+    <div class="card" id="refineCard">
+      <label class="field"><span class="row between"><span>Pieces <b id="detV"></b></span><span class="small muted" id="detHint"></span></span>
+        <input type="range" id="det" min="1" max="10" step="1" aria-describedby="detHint"><span class="ends small muted"><span>fewer, bigger pieces</span><span>more detail <span class="pro">PRO 9–10</span></span></span>
+        <span class="pro-note small" id="detPro" hidden><span class="pro">PRO</span> high detail</span></label>
+      <label class="field"><span class="row between"><span>Glass colors <b id="colV"></b></span><span class="small muted">Most sheets to buy</span></span>
+        <input type="range" id="col" min="4" max="24" step="1"><span class="ends small muted"><span>fewer sheets</span><span>closer colors</span></span></label>
+      <div class="field"><span>Smooth curves</span><div class="seg" id="smoothSeg" role="group" aria-label="Smooth curves"></div><p class="small muted" id="smoothNote"></p></div>
+      <details class="more" id="moreOpts"><summary>More — tools &amp; lines</summary>
         <div class="field"><span>Tools you have</span><div class="seg" id="toolSeg" role="group" aria-label="Tools"></div><p class="small muted" id="toolNote"></p></div>
         <div class="field"><span>How pieces are joined</span><div class="seg" id="lineSeg" role="group" aria-label="Joining method"></div></div>
         <div class="field"><span>Line width</span><div class="seg" id="lwSeg" role="group" aria-label="Line width"></div></div>
@@ -105,7 +107,7 @@
   <section id="v-glass" class="view" hidden>
     <div class="card">
       <h3>Matched glass to buy</h3>
-      <p class="small muted" id="glassIntro">Each color is the closest named glass from the palette to the average color in that region of your photo.</p>
+      <p class="small muted" id="glassIntro">Each glass is picked from a catalog of cathedral, opalescent and streaky sheets as the closest match (CIEDE2000) to its pieces’ color in your photo — glare and shadows are ignored.</p>
       <div class="row gap wrap ctl-row">
         <label class="sel"><span>Sheet size</span><select id="sheetSel"></select></label>
         <div class="field" style="flex:1 1 100%"><span>Extra for waste</span><div class="seg" id="wasteSeg" role="group" aria-label="Waste allowance"></div></div>
@@ -126,7 +128,7 @@
         <button class="export" data-exp="full"><b>⤓ Full-size cut pattern</b><span>Numbered cut lines at real size, tiled with alignment marks <span class="pro">PRO</span></span></button>
         <button class="export" data-exp="paint"><b>⤓ Full-size paint guide</b><span>Dashed paint lines to trace onto each piece <span class="pro">PRO</span></span></button>
         <button class="export" data-exp="sheet"><b>⤓ Numbered cut sheet</b><span>One-page color map + piece list by glass color</span></button>
-        <button class="export" data-exp="svg"><b>⤓ SVG (real size)</b><span>For Cricut, plotters and drawing apps <span class="pro">PRO</span></span></button>
+        <button class="export" data-exp="svg"><b>⤓ SVG (real size)</b><span>Real size with lead lines, numbers and a color key <span class="pro">PRO</span></span></button>
         <button class="export" data-exp="png"><b>⤓ Picture (PNG)</b><span>Color preview to share</span></button>
         <button class="export" data-exp="list"><b>⤓ Shopping list</b><span>Glass, foil or came — as text</span></button>
       </div>
@@ -145,6 +147,7 @@
 <div class="toast" id="toast" hidden role="status"><span id="toastText"></span><button class="link" id="toastUndo" hidden>Undo</button></div>
 
 <script src="pdf.js"></script>
+<script src="catalog.js"></script>
 <script src="glass.js"></script>
 <script src="tracer.js"></script>
 <script src="db.js"></script>

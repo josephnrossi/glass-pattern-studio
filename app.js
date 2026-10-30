@@ -1,6 +1,6 @@
 /* Glass Pattern Studio — stained glass from a photo: Photo → Size → Regions/Glass → Glass list → Print.
    My Projects (IndexedDB) + beginner guide. Engine (tracer.js, glass.js, pdf.js) offline, no AI key. */
-const APP_VERSION = '0.2';
+const APP_VERSION = '0.3';
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const r1 = n => Math.round(n * 10) / 10;
@@ -26,6 +26,9 @@ const SIZES_IN = [[8, 10], [11, 14], [12, 12], [12, 16], [16, 20], [18, 24]];
 const SIZES_CM = [[20, 25], [30, 30], [30, 40], [40, 50], [45, 60]];
 const TOOLS = [['hand', 'Hand', 'Cutter + pliers only: pieces stay at least about 0.3 sq in (196 mm²) and 7 mm wide, curves gentle.'], ['grinder', 'Grinder', 'Cut close, grind to the line: pieces down to about 0.16 sq in (100 mm²) and 5 mm wide.'], ['ringsaw', 'Ring saw', 'Saw cuts any direction: deep inside curves, pieces down to about 0.1 sq in (64 mm²), 4 mm wide.']];
 const LINES = { foil: [['foil116', '1/16″'], ['foil18', '1/8″']], came: [['came316', '3/16″'], ['came14', '1/4″']] };
+const SMOOTH = [['low', 'Low', 'Follows the photo closely; some tighter curves.'], ['medium', 'Medium', 'Inside curves no tighter than your tool cuts (about a 1/4″ grinder bit with a grinder).'], ['high', 'High', 'Extra-smooth, flowing lines — easiest to cut and foil.']];
+const MATCH = d => d == null ? '' : d < 3 ? 'near-exact match' : d < 6 ? 'very close match' : d < 10 ? 'close match' : 'nearest in catalog';
+const FAMN = { C: 'Cathedral', O: 'Opalescent', S: 'Streaky', M: 'Your glass' };
 const VIEWS = [['regions', 'Regions'], ['color', 'Glass'], ['cut', 'Numbered'], ['paint', 'Paint guide'], ['overlay', 'Overlay']];
 const cmU = () => cur && cur.unit === 'cm';
 const toU = v => cmU() ? r1(v * 2.54) : Math.round(v * 100) / 100, fromU = v => cmU() ? v / 2.54 : v;
@@ -36,8 +39,8 @@ const sizeU = (w, h) => `${toU(w)} × ${toU(h)} ${cmU() ? 'cm' : 'in'}`;
 /* ---------- state ---------- */
 let cur = null, P = null, cropURL = null, step = 'home', view = 'color', op = 0.5, buildSeq = 0, buildT = 0, imgEl = null;
 const ORDER = ['home', 'crop', 'pattern', 'glass', 'print'];
-function newProject(orig, name) { return { id: uid(), name, created: Date.now(), updated: Date.now(), orig, crop: null, unit: 'in', widthIn: 12, heightIn: 12, preset: null, frame: true, frameIn: 1, detail: 5, tool: 'grinder', tpaint: true, tpaintAmt: 'medium', join: 'foil', line: 'foil116', tcolors: 10, sheet: '12x12', waste: 30, paper: 'letter', P: null, thumb: null }; }
-const engineOpts = () => ({ ...glassDefaults(), method: 'trace', widthIn: cur.widthIn, heightIn: cur.heightIn, frame: cur.frame, frameIn: cur.frameIn, detail: cur.detail, tool: cur.tool, tpaint: cur.tpaint, tpaintAmt: cur.tpaintAmt, line: cur.line, tcolors: cur.tcolors, unit: cur.unit, focus: false, zoom: false });
+function newProject(orig, name) { return { id: uid(), name, created: Date.now(), updated: Date.now(), orig, crop: null, unit: 'in', widthIn: 12, heightIn: 12, preset: null, frame: true, frameIn: 1, detail: 5, tool: 'grinder', tpaint: true, tpaintAmt: 'medium', join: 'foil', line: 'foil116', tcolors: 10, smooth: 'medium', sheet: '12x12', waste: 30, paper: 'letter', P: null, thumb: null }; }
+const engineOpts = () => ({ ...glassDefaults(), method: 'trace', widthIn: cur.widthIn, heightIn: cur.heightIn, frame: cur.frame, frameIn: cur.frameIn, detail: cur.detail, tool: cur.tool, tpaint: cur.tpaint, tpaintAmt: cur.tpaintAmt, line: cur.line, tcolors: cur.tcolors, smooth: cur.smooth || 'medium', unit: cur.unit, focus: false, zoom: false });
 
 /* ---------- navigation ---------- */
 function go(s) {
@@ -150,7 +153,7 @@ function traceRun(id, o) {
 function buildPattern(delay = 200) {
   const seq = ++buildSeq; $('#prev').classList.add('busy'); clearTimeout(buildT);
   buildT = setTimeout(async () => {
-    try { const src = await croppedImage(), o = engineOpts(), id = await glassImageData(src, o), t0 = performance.now(), R = await traceRun(id, o); if (seq !== buildSeq) return; R.ms = Math.round(performance.now() - t0); P = R; window.__P = P; view = view === 'trace' ? 'regions' : view; $$('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === view))); drawPattern(); save(); }
+    try { const src = await croppedImage(), o = engineOpts(), id = await glassImageData(src, o), t0 = performance.now(), R = await traceRun(id, o); if (seq !== buildSeq) return; R.ms = Math.round(performance.now() - t0); P = R; window.__P = P; view = view === 'trace' ? 'regions' : view; $$('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === view))); drawPattern(); renderControls(); save(); }
     catch (e) { if (seq === buildSeq) $('#prev').innerHTML = `<p class="wait">Couldn’t build the pattern: ${esc(e.message)}</p>`; }
     finally { if (seq === buildSeq) $('#prev').classList.remove('busy'); }
   }, delay);
@@ -171,6 +174,8 @@ function renderPattern() {
   $$('[data-tool]').forEach(b => b.onclick = () => { cur.tool = b.dataset.tool; renderControls(); buildPattern(); });
   $('#lineSeg').innerHTML = `<button data-join="foil" aria-pressed="${cur.join === 'foil'}">Copper foil<small>Tiffany method</small></button><button data-join="came" aria-pressed="${cur.join === 'came'}">Lead came<small>traditional</small></button>`;
   $$('[data-join]').forEach(b => b.onclick = () => { cur.join = b.dataset.join; cur.line = LINES[cur.join][0][0]; renderControls(); buildPattern(); });
+  $('#smoothSeg').innerHTML = SMOOTH.map(([k, l]) => `<button data-smooth="${k}">${l}</button>`).join('');
+  $$('[data-smooth]').forEach(b => b.onclick = () => { cur.smooth = b.dataset.smooth; renderControls(); buildPattern(); });
   $('#paintSeg').innerHTML = [['light', 'Light'], ['medium', 'Medium'], ['bold', 'Bold']].map(([k, l]) => `<button data-pamt="${k}">${l}</button>`).join('');
   $$('[data-pamt]').forEach(b => b.onclick = () => { cur.tpaintAmt = b.dataset.pamt; renderControls(); buildPattern(); });
   renderControls();
@@ -178,6 +183,8 @@ function renderPattern() {
 }
 function renderControls() {
   $('#det').value = cur.detail; $('#detV').textContent = cur.detail; $('#detPro').hidden = cur.detail < 9;
+  { const t = self.PhotoTracer.rules({ detail: cur.detail, tool: cur.tool, line: cur.line }, 1).target; $('#detHint').textContent = P && P.stats ? `aiming for ~${t} · now ${P.stats.pieces}` : `aiming for ~${t} pieces`; }
+  const sm = cur.smooth || 'medium'; $$('[data-smooth]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.smooth === sm))); $('#smoothNote').textContent = SMOOTH.find(x => x[0] === sm)[2];
   $$('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === cur.tool))); $('#toolNote').textContent = TOOLS.find(t => t[0] === cur.tool)[2];
   $$('[data-join]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.join === cur.join)));
   $('#lwSeg').innerHTML = LINES[cur.join].map(([k, l]) => `<button data-lw="${k}" aria-pressed="${cur.line === k}">${l}</button>`).join(''); $$('[data-lw]').forEach(b => b.onclick = () => { cur.line = b.dataset.lw; renderControls(); buildPattern(); });
@@ -201,8 +208,8 @@ function renderLegend() {
     box.innerHTML = `<p class="leg-note"><b>Regions from your photo</b> — ${n.toLocaleString()} color areas found. Next, each area is matched to a named glass.</p>`;
     return;
   }
-  box.innerHTML = `<p class="leg-note"><b>Best-match glass</b> — each swatch is the closest named glass to that region of your photo.</p><div class="leg-row">` +
-    P.legend.map(e => `<div class="leg"><span class="sw" style="background:${e.hex}"></span><span class="nm">${esc(e.glass)}</span><span class="ct">${e.count}</span></div>`).join('') + `</div>`;
+  box.innerHTML = `<p class="leg-note"><b>Best-match glass</b> — the fewest catalog sheets that match your photo closely (code · name · pieces).</p><div class="leg-row">` +
+    P.legend.map(e => `<div class="leg"><span class="sw" style="background:${e.hex}"></span><span class="nm">${e.code ? `<small class="code">${esc(e.code)}</small> ` : ''}${esc(e.glass)}</span><span class="ct">${e.count}</span></div>`).join('') + `</div>`;
 }
 function drawPattern() {
   if (!P || step !== 'pattern') return; const prev = $('#prev'), hasPaint = !!(P.paint && P.paint.lines.length);
@@ -221,7 +228,7 @@ function drawPattern() {
   $('#sum').innerHTML = view === 'regions'
     ? `<b>Regions</b> — your photo divided into ${P.trace ? P.trace.regions.toLocaleString() : ''} color areas. Tap <b>Glass</b> to see each area filled with its best-match stained-glass color. The cuttable pattern has <b>${s.pieces} pieces</b>.`
     : view === 'color'
-    ? `<b>${s.pieces} pieces</b> filled with <b>${P.legend.length} glass colors</b> matched from the palette · <span class="diff ${s.difficulty === 'Beginner' ? 'beg' : 'int'}">${esc(s.difficulty)}</span><br><span class="muted">Smallest piece ${areaU(s.smallestIn)} · ${sizeU(P.widthIn, P.heightIn)} · ${esc(s.toolLabel || '')}</span>`
+    ? `<b>${s.pieces} pieces</b> filled with <b>${P.legend.length} glass colors</b> matched from the ${P.match ? P.match.catalog + '-glass catalog' : 'palette'} · <span class="diff ${s.difficulty === 'Beginner' ? 'beg' : 'int'}">${esc(s.difficulty)}</span><br><span class="muted">Smallest piece ${areaU(s.smallestIn)} · ${sizeU(P.widthIn, P.heightIn)} · ${esc(s.toolLabel || '')}</span>`
     : `<b>${s.pieces} pieces</b> · ${P.legend.length} glass colors · <span class="diff ${s.difficulty === 'Beginner' ? 'beg' : 'int'}">${esc(s.difficulty)}</span><br><span class="muted">Smallest piece ${areaU(s.smallestIn)} · ${sizeU(P.widthIn, P.heightIn)} · ${esc(s.toolLabel || '')}${view === 'paint' ? ' · dashed lines = paint, not cuts' : ''}</span>`;
 }
 
@@ -235,8 +242,8 @@ function renderGlass() {
   $$('[data-waste]').forEach(b => b.onclick = () => { cur.waste = +b.dataset.waste; renderGlass(); save(); });
   const M = glassMaterials(P, { sheet: cur.sheet, waste: cur.waste, line: cur.join }); window.__M = M;
   $('#glassList').innerHTML = M.colors.map(c => {
-    const match = c.srcHex ? `<span class="match"><i class="dot" style="background:${c.srcHex}" title="Average photo color"></i><span class="arr">→</span><i class="dot" style="background:${c.hex}" title="${esc(c.glass)}"></i><em>best match</em></span>` : `<span class="match"><em>best match from palette</em></span>`;
-    return `<div class="gl"><span class="sw" style="background:${c.hex}"></span><div><b>${esc(c.glass)}</b>${match}<small>${c.count} piece${c.count === 1 ? '' : 's'} · ${areaU(c.areaIn)} → buy ${areaU(c.buyIn)}</small>${c.fits ? '' : `<small class="warnline">${c.bigFrame ? `Border strip #${c.bigN} is longer than this sheet — buy a longer sheet or cut the strip in two` : `Piece #${c.bigN} is bigger than one sheet — buy a larger sheet`}</small>`}${c.scrap ? '<small>Tiny amount: a scrap or offcut will do</small>' : ''}</div><div class="n">${c.scrap ? '<small>scrap</small>' : `${c.sheets}<small> sheet${c.sheets === 1 ? '' : 's'}</small>`}</div></div>`;
+    const match = c.srcHex ? `<span class="match"><i class="dot" style="background:${c.srcHex}" title="Average photo color"></i><span class="arr">→</span><i class="dot" style="background:${c.hex}" title="${esc(c.glass)}"></i><em>${c.code ? esc(MATCH(c.dE)) + (c.dE != null ? ` · ΔE ${c.dE}` : '') : 'best match'}</em></span>` : `<span class="match"><em>best match from palette</em></span>`;
+    return `<div class="gl"><span class="sw" style="background:${c.hex}"></span><div><b>${c.code ? `<span class="code">${esc(c.code)}</span> ` : ''}${esc(c.glass)}</b>${c.family ? `<small class="fam">${esc(FAMN[c.family] || '')}</small>` : ''}${match}<small>${c.count} piece${c.count === 1 ? '' : 's'} · ${areaU(c.areaIn)} → buy ${areaU(c.buyIn)}</small>${c.fits ? '' : `<small class="warnline">${c.bigFrame ? `Border strip #${c.bigN} is longer than this sheet — buy a longer sheet or cut the strip in two` : `Piece #${c.bigN} is bigger than one sheet — buy a larger sheet`}</small>`}${c.scrap ? '<small>Tiny amount: a scrap or offcut will do</small>' : ''}</div><div class="n">${c.scrap ? '<small>scrap</small>' : `${c.sheets}<small> sheet${c.sheets === 1 ? '' : 's'}</small>`}</div></div>`;
   }).join('');
   const foil = cur.join === 'foil';
   $('#matCard').innerHTML = `<h3>Totals</h3><div class="tot"><div><b>${M.pieces}</b><small>pieces to cut</small></div><div><b>${M.sheets}</b><small>sheets${M.scraps ? ` + ${M.scraps} scrap${M.scraps === 1 ? '' : 's'}` : ''} · ${M.colors.length} colors</small></div><div><b>${areaU(M.areaIn)}</b><small>glass in the panel</small></div><div><b>${areaU(M.buyIn)}</b><small>to buy (+${M.waste}%)</small></div></div>
@@ -270,7 +277,7 @@ async function doExport(kind, btn) {
     if (kind === 'full') { const d = glassFullPDF(P, { paper: cur.paper, kind: 'cut', name: cur.name }); window.__lastPDF = d.meta; await shareOrDownload(fname('pdf').replace('.pdf', '-fullsize.pdf'), d.blob(), 'application/pdf'); }
     else if (kind === 'paint') { if (!(P.paint && P.paint.lines.length)) { toast('Turn on Paint lines on the Pattern step first'); return; } const d = glassFullPDF(P, { paper: cur.paper, kind: 'paint', name: cur.name }); window.__lastPDF = d.meta; await shareOrDownload(fname('pdf').replace('.pdf', '-paintguide.pdf'), d.blob(), 'application/pdf'); }
     else if (kind === 'sheet') { const d = glassCutSheetPDF(P, M, { paper: cur.paper, name: cur.name }); window.__lastPDF = d.meta; await shareOrDownload(fname('pdf').replace('.pdf', '-cutsheet.pdf'), d.blob(), 'application/pdf'); }
-    else if (kind === 'svg') await shareOrDownload(fname('svg'), glassSVG(P, { cut: false, numbers: true }), 'image/svg+xml');
+    else if (kind === 'svg') { const svg = patternExportSVG(P); window.__lastSVG = svg; await shareOrDownload(fname('svg'), svg, 'image/svg+xml'); }
     else if (kind === 'png') { const u = await patternJPEG(P, 2000); const b = await (await fetch(u)).blob(); await shareOrDownload(fname('jpg'), b, 'image/jpeg'); }
     else if (kind === 'list') { const t = shoppingListText(P, M, { name: cur.name, cm: cmU() }); try { await navigator.clipboard.writeText(t); toast('Shopping list copied'); } catch (_) {} await shareOrDownload(fname('txt').replace('.txt', '-shopping-list.txt'), t, 'text/plain'); }
   } catch (e) { toast('Export failed: ' + e.message); } finally { btn && btn.classList.remove('busy'); }
@@ -278,7 +285,7 @@ async function doExport(kind, btn) {
 
 /* ---------- about ---------- */
 $('#btnAbout').onclick = () => openSheet(`<h3>Glass Pattern Studio <small class="muted">${APP_VERSION}</small></h3>
-  <p class="small"><b>Stained glass from a photo.</b> Take a picture, the app divides it into regions, then fills each region with the closest named glass from a real palette. You get numbered pieces, a shopping list and a full-size print. No account, no AI key, no server — everything stays on this device.</p>
+  <p class="small"><b>Stained glass from a photo.</b> Take a picture, the app divides it into regions, then fills each region with the closest glass from a ${typeof GLASS_CATALOG !== 'undefined' ? GLASS_CATALOG.length : ''}-sheet catalog (cathedral, opalescent, streaky), matched by CIEDE2000.</p><p class="small">Pieces are kept cuttable for your tools: no slivers or tiny islands, every piece at least the tool’s minimum size, and inside curves no tighter than the tool can cut. Catalog codes are this app’s own numbers, not manufacturer SKUs — colors are approximate, so check the real sheet. You get numbered pieces, a shopping list and a full-size print. No account, no AI key, no server — everything stays on this device.</p>
   <p class="small"><span class="pro">PRO</span> marks features that could be part of a paid version later (full-size tiled PDFs, SVG export, Detail 9–10, more than ${FREE_PROJECTS} projects). Nothing is locked or charged in this preview.</p>
   <p class="small muted">Working name — rename before selling (see NOTES.md). Sample photos: Wikimedia Commons, CC0. Cutting and material rules from published stained-glass guides.</p>
   <button class="primary" style="width:100%" onclick="closeSheet()">Close</button>`);

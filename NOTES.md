@@ -1,9 +1,28 @@
-# Glass Pattern Studio — mockup notes (v0.2, not published)
+# Glass Pattern Studio — mockup notes (v0.3 mock, not published; live site is still v0.2)
 
 Standalone stained-glass pattern app spun off from Scan Lab's stained-glass mode. **Status: published** at https://josephnrossi.github.io/glass-pattern-studio/ — still iterate from `/workspace/glass-app`.
 Folder: `/workspace/glass-app`. Scan Lab (`/workspace/scan-lab`, v7 `913db9a`) was not modified.
 
-## v0.2 — conversion focus (this pass)
+## v0.3 — refined, more accurate patterns (mock, waiting for approval)
+Audit (tests/audit.js, Chromium, 4 photos: backlit portrait, tulip, flat logo, detailed house; 15×10 / 12×12 / 13×10 in, Detail 6, grinder, 1/16″ foil, 10 colors):
+| | v0.2 | v0.3 |
+|---|---|---|
+| pieces below the tool minimum (portrait / tulip / logo / house) | 11 / 11 / 0 / 8 | **0 / 0 / 0 / 0** |
+| ΔE00 photo → named glass, area-weighted mean | 16.3 / 13.9 / 4.7 / 9.5 | **8.9 / 6.1 / 3.5 / 6.6** |
+| duplicate glass names ("Amber B") | 2 / 1 / 3 / 2 | **0** |
+| glasses used (limit 10) | 10 / 10 / 10 / 10 | 9 / 10 / **7** / 10 |
+| outline vertices per inch (lower = smoother) | 4.96 / 4.62 / 2.10 / 5.04 | 4.53 / 4.24 / 2.13 / 4.87 |
+v0.2 weaknesses found: (1) the shown "glass" was the photo's own average colour, not a glass — names came from a 33-colour list by RGB distance, so the colour you saw was not what you'd buy; (2) the palette was k-means of photo colours, so near-identical clusters became "Charcoal" + "Charcoal B", and a 6-colour logo still used 10 sheets; (3) plain means — glare, lens flare and shadow specks skewed piece colours (the backlit portrait went grey/black); (4) small-piece clean-up ran at 55% of the minimum, leaving 8–11 under-size pieces per photo; (5) wobbly, stair-stepped outlines with tight notches; (6) feature pieces (eyes) could be slivers; (7) SVG had no key, PDFs no colour key / glass codes; (8) iPad got a 640 px phone column.
+Changes:
+- `catalog.js` (new): 103 glasses — Cathedral (C-), Opalescent (O-), Streaky/wispy (S-). **Codes are the app's own numbers, not manufacturer SKUs; colours are approximate.** Replace with a real supplier catalog before selling.
+- `tracer.js` (app copy only; Scan Lab untouched): lighting-aware piece colour (15–85th lightness percentile trimmed mean of the unsmoothed photo); CIEDE2000 matching (kL 1.15) with a greedy + swap facility-location pick of at most N glasses (stops when another sheet would improve the average match by < 0.12 ΔE); same-glass neighbours merge but never below 85% of the Detail target; disc mode filter at the tool's inside-curve radius (hand 0.19″, grinder 0.125″ ≈ 1/4″ bit, ring saw 0.07″; Smooth curves Low ×0.6 / Medium / High ×1.45); long thin pieces (length ≳ 10× width) get a break line, very concave large pieces too; feature exemption only for compact features; strict final clean-up at 100% of the minimum area with no enclosed pieces. Pieces carry `code`, `family`, `glassRGB`, `dE`, `feature`; legend carries code/family/srcHex/dE. Engine id `gps-v0.3`, pattern version 4.
+- UI: Convert step now leads with **Pieces** (shows target and actual count), **Glass colors** (a maximum), **Smooth curves** Low/Medium/High; tools & lines under More. iPad: two-column Convert step at ≥ 900 px (landscape), wider column 760–899 px. Glass list shows code, family and match quality (ΔE).
+- Exports: SVG is real-size with lead lines, numbers, `data-code` per piece and a colour key strip below the panel (panel stays 1:1). Full-size PDF gets a colour-key page and the glass code under each piece number. Cut sheet and shopping list list codes (+ family).
+- SW cache `glass-studio-v0-3` (adds catalog.js).
+- Tests: `tests/pipeline.js` (44 checks), `tests/audit.js` (v0.2 vs v0.3, needs a worktree of 9b79db5 at /workspace/glass-app-v02), `tests/ipad-shots.js`, `tests/metrics.js`. Test photos: `tests/photos/portrait.jpg` (Wikimedia Commons “Young woman in leather jacket (Unsplash).jpg”, CC0) and `tests/photos/logo.jpg` (drawn for the test).
+Deferred: face/subject-aware segmentation (keep eyes/nose/mouth lines on portraits); flowing "designed" background lines instead of segmenting blur (backgrounds still look like cracked mud); fixing the few 4-way joints; streaky-glass texture preview and grain direction; a real manufacturer catalog with SKUs and prices; DXF/PDF vector export for plotters; manual piece edit (merge/split/recolour); nesting pieces on sheets.
+
+## v0.2 — conversion focus
 - **Stained-glass only** UI copy: home is “Photo → regions → glass colors”; step 3 labeled **Convert**.
 - Pattern step shows progress chips **Photo · Regions · Glass**, a **Regions** view (photo areas with outlines), and a **Glass** view with on-canvas legend of **named palette glasses**.
 - Primary control: **Glass colors** (“How many glass sheets to match”). Detail / tools / foil-came / paint under **More**.

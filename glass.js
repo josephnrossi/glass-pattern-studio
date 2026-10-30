@@ -17,7 +17,7 @@ const GLASS_PALETTE = [
 ];
 const gHex = c => '#' + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
 const cdist = (a, b) => { const rm = (a[0] + b[0]) / 2, dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2]; return Math.sqrt((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db); };
-function glassTraceEnv(o) { return { palette: GLASS_PALETTE, line: GLASS_LINES[o.line] || GLASS_LINES.foil116, frameGlass: o.frameGlass || '', user: (o.userColors || []).filter(u => /^#[0-9a-f]{6}$/i.test(u.hex)).map(u => [u.name, ...[1, 3, 5].map(i => parseInt(u.hex.slice(i, i + 2), 16))]) }; }
+function glassTraceEnv(o) { return { palette: GLASS_PALETTE, catalog: o.catalog !== false && typeof GLASS_CATALOG !== 'undefined' ? GLASS_CATALOG : null, line: GLASS_LINES[o.line] || GLASS_LINES.foil116, frameGlass: o.frameGlass || '', user: (o.userColors || []).filter(u => /^#[0-9a-f]{6}$/i.test(u.hex)).map(u => [u.name, ...[1, 3, 5].map(i => parseInt(u.hex.slice(i, i + 2), 16))]) }; }
 function nearestGlass(c, user) {
   let best = GLASS_PALETTE[0], bd = 1e9; for (const p of GLASS_PALETTE) { const d = cdist(c, [p[1], p[2], p[3]]); if (d < bd) { bd = d; best = p; } }
   if (user && user.length) { let ub = null, ud = 1e9; for (const u of user) { const d = cdist(c, [u[1], u[2], u[3]]); if (d < ud) { ud = d; ub = u; } } if (ub && ud <= bd * 1.6 + 45) return { name: ub[0], rgb: [ub[1], ub[2], ub[3]], user: true }; }
@@ -1103,7 +1103,7 @@ async function glassImageData(src, o) {
 /* ---------- SVG ---------- */
 function glassSVG(P, { cut = false, numbers = true, scaleBar = true, fill = 'glass', photo = null, opacity = 1, lines: showLines = true, paint: showPaint = true, paintGuide = false } = {}) {
   const lw = P.lineIn * P.ppi, lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], colOf = p => cut ? [255, 255, 255] : fill === 'photo' && p.src ? p.src : p.rgb;
-  const body = P.pieces.map(p => `<path data-piece="${p.n}" d="${p.segs.map(segsToD).join('')}" fill="${gHex(colOf(p))}" fill-rule="evenodd"/>`).join('');
+  const body = P.pieces.map(p => `<path data-piece="${p.n}"${p.code ? ` data-code="${p.code}" data-glass="${String(p.glass).replace(/[<>&"]/g, '')}"` : ''} d="${p.segs.map(segsToD).join('')}" fill="${gHex(colOf(p))}" fill-rule="evenodd"/>`).join('');
   const lines = P.pieces.map(p => `<path d="${p.segs.map(segsToD).join('')}"/>`).join('');
   const sil = (P.silhouette || []).map(s => segsToD(s)).join(''), det = (P.detail || []).map(l => 'M' + l.map(q => q.join(' ')).join('L')).join(''), dots = (P.dots || []).map(d => `<ellipse cx="${d.cx}" cy="${d.cy}" rx="${d.rx}" ry="${d.ry}" fill="${cut ? 'none' : d.hex}" stroke="${cut ? '#b0b0b0' : 'none'}"/>`).join('') + (P.shapes || []).map(d => `<path d="M${d.pts.map(q => q.join(' ')).join('L')}Z" fill="${cut ? 'none' : d.hex}" stroke="${cut ? '#b0b0b0' : 'none'}"/>`).join('');
   const nums = numbers ? P.pieces.map(p => `<text x="${p.label[0]}" y="${p.label[1]}" font-size="${p.font}" fill="${cut || (opacity > 0.5 && lum(colOf(p)) > 140) ? '#000' : '#fff'}"${opacity <= 0.5 && !cut ? ' stroke="#000" stroke-width="0.6" paint-order="stroke"' : ''}>${p.n}</text>`).join('') : '';

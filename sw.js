@@ -1,6 +1,6 @@
 /* Glass Pattern Studio service worker — versioned offline shell. */
-const CACHE = 'glass-studio-v0-2';
-const SHELL = ['./', 'index.html', 'styles.css', 'manifest.json', 'pdf.js', 'glass.js', 'tracer.js', 'tracer-worker.js', 'db.js', 'materials.js', 'print.js', 'guide.js', 'app.js',
+const CACHE = 'glass-studio-v0-3';
+const SHELL = ['./', 'index.html', 'styles.css', 'manifest.json', 'pdf.js', 'catalog.js', 'glass.js', 'tracer.js', 'tracer-worker.js', 'db.js', 'materials.js', 'print.js', 'guide.js', 'app.js',
   'samples/bird.jpg', 'samples/house.jpg', 'samples/cat.jpg', 'samples/tulip.jpg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/favicon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('glass-studio-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

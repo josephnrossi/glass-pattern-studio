@@ -4,7 +4,14 @@
      except small high-contrast features (eyes, beak, windows) which are kept  5 cuttability: opening at the minimum width, straight cuts through very concave or
      oversized pieces, extra cut lines so no piece encloses another  6 shared borders traced into smooth, gap-free curves (Douglas-Peucker + quadratic curves),
      numbered pieces, glass palette (k-means over the pieces' real colours, 6–24), legend with area per colour.
-   Runs in a Web Worker (tracer-worker.js) or inline. Exposes self.PhotoTracer = { trace, rules }. */
+   Runs in a Web Worker (tracer-worker.js) or inline. Exposes self.PhotoTracer = { trace, rules }.
+   Glass Pattern Studio v0.3 refinements (only when env.catalog is given; Scan Lab's own copy is unchanged):
+   • lighting-aware piece colour: trimmed mean (15–85th percentile of lightness) of the unsmoothed photo, so highlights, glare and shadow specks don't skew it
+   • glass matching: CIEDE2000 against a named glass catalog (catalog.js); the "Glass colors" slider is a MAXIMUM — a facility-location pick
+     (greedy + swap) chooses the few sheets that best cover the whole picture, so no "Amber B" duplicates and a 6-colour logo uses ~6 glasses
+   • smooth, cuttable outlines: a disc mode filter at the tool's inside-curve radius (grinder bit ≈ 1/8″ radius) rounds jagged pixel edges,
+     fills deep narrow notches and settles 3-way joints towards ~120°
+   • strict minimum size: every piece ≥ the tool's minimum area (feature pieces such as eyes ≥ the feature minimum), no enclosed islands */
 (function (root) {
 'use strict';
 function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -261,6 +268,61 @@ function splitPiece(R, W, H, r, k, nextId) {
   const km = kmeansPP(P, w, k, 12, 5 + r); px.forEach((p, i) => { if (km.as[i]) R[p] = nextId + km.as[i] - 1; }); return km.C.length - 1;
 }
 
+/* ---------- v0.3: smoothing + perceptual glass matching ---------- */
+/* disc mode (plurality) filter on the piece map: each border pixel takes the piece that owns most of the disc around it.
+   Removes stair-steps and spurs, rounds inside curves to about the disc radius; protected (feature) pieces neither shrink nor grow. */
+function modeSmooth(R, W, H, rad, protect, iters) {
+  const off = []; for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) if (dx * dx + dy * dy <= rad * rad + 0.5) off.push(dx, dy);
+  const no = off.length / 2, lb = new Int32Array(64), ct = new Int32Array(64);
+  for (let it = 0; it < iters; it++) { const D = distToEdge(R, W, H), o = R.slice(); let moved = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; if (D[p] > rad + 0.5) continue; const own = R[p]; if (protect && protect[own]) continue;
+      let k = 0; for (let t = 0; t < no; t++) { const xx = x + off[2 * t], yy = y + off[2 * t + 1]; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const l = R[yy * W + xx]; let j = 0; for (; j < k; j++) if (lb[j] === l) { ct[j]++; break; } if (j === k && k < 64) { lb[k] = l; ct[k] = 1; k++; } }
+      let best = own, bc = -1; for (let j = 0; j < k; j++) if (lb[j] === own) bc = ct[j];
+      for (let j = 0; j < k; j++) { const l = lb[j]; if (l === own || (protect && protect[l])) continue; if (ct[j] > bc) { bc = ct[j]; best = l; } }
+      if (best !== own) { o[p] = best; moved++; } }
+    R = o; if (!moved) break; }
+  return R;
+}
+/* CIEDE2000 (Sharma, Wu & Dalal 2005); kL > 1 lets lightness count a little less than hue/chroma (backlit glass varies in brightness more than in hue) */
+function de00(L1, a1, b1, L2, a2, b2, kL) {
+  const rad = Math.PI / 180, C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2), Cb = (C1 + C2) / 2, C7 = Cb ** 7, G = 0.5 * (1 - Math.sqrt(C7 / (C7 + 6103515625)));
+  const ap1 = a1 * (1 + G), ap2 = a2 * (1 + G), Cp1 = Math.hypot(ap1, b1), Cp2 = Math.hypot(ap2, b2);
+  let h1 = (ap1 || b1) ? Math.atan2(b1, ap1) / rad : 0; if (h1 < 0) h1 += 360; let h2 = (ap2 || b2) ? Math.atan2(b2, ap2) / rad : 0; if (h2 < 0) h2 += 360;
+  const dL = L2 - L1, dC = Cp2 - Cp1; let dh = 0; if (Cp1 * Cp2) { dh = h2 - h1; if (dh > 180) dh -= 360; else if (dh < -180) dh += 360; } const dH = 2 * Math.sqrt(Cp1 * Cp2) * Math.sin(dh / 2 * rad);
+  const Lb = (L1 + L2) / 2, Cpb = (Cp1 + Cp2) / 2; let hb = h1 + h2; if (Cp1 * Cp2) { if (Math.abs(h1 - h2) > 180) hb = hb < 360 ? hb + 360 : hb - 360; hb /= 2; }
+  const T = 1 - 0.17 * Math.cos((hb - 30) * rad) + 0.24 * Math.cos(2 * hb * rad) + 0.32 * Math.cos((3 * hb + 6) * rad) - 0.2 * Math.cos((4 * hb - 63) * rad), dT = 30 * Math.exp(-(((hb - 275) / 25) ** 2)), Cp7 = Cpb ** 7, RC = 2 * Math.sqrt(Cp7 / (Cp7 + 6103515625));
+  const SL = (1 + 0.015 * (Lb - 50) ** 2 / Math.sqrt(20 + (Lb - 50) ** 2)) * (kL || 1), SC = 1 + 0.045 * Cpb, SH = 1 + 0.015 * Cpb * T, RT = -Math.sin(2 * dT * rad) * RC;
+  return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
+}
+/* lighting-aware colour per piece: mean of the pixels between the 15th and 85th lightness percentile (drops glare, specular highlights and shadow specks) */
+function robustColors(R, n, A0, F, N) {
+  const B = 101, Hs = new Int32Array(n * B), cnt = new Int32Array(n);
+  for (let p = 0; p < N; p++) { const r = R[p]; if (r < 0) continue; Hs[r * B + Math.max(0, Math.min(100, Math.round(A0[p * 3])))]++; cnt[r]++; }
+  const lo = new Int32Array(n), hi = new Int32Array(n).fill(100);
+  for (let r = 0; r < n; r++) { if (cnt[r] < 24) continue; let acc = 0, a = -1, b = 100; for (let i = 0; i < B; i++) { acc += Hs[r * B + i]; if (a < 0 && acc >= cnt[r] * 0.15) a = i; if (acc >= cnt[r] * 0.85) { b = i; break; } } lo[r] = a; hi[r] = b; }
+  const lab = new Float64Array(n * 3), rgb = new Float64Array(n * 3), w = new Float64Array(n);
+  for (let p = 0; p < N; p++) { const r = R[p]; if (r < 0) continue; const L = Math.round(A0[p * 3]); if (L < lo[r] || L > hi[r]) continue; w[r]++; for (let c = 0; c < 3; c++) { lab[r * 3 + c] += A0[p * 3 + c]; rgb[r * 3 + c] += F[p * 4 + c]; } }
+  for (let r = 0; r < n; r++) { const k = w[r] || 1; for (let c = 0; c < 3; c++) { lab[r * 3 + c] /= k; rgb[r * 3 + c] /= k; } }
+  return { lab, rgb, area: cnt };
+}
+/* choose at most K catalog glasses that best cover all pieces (weighted ΔE00), greedy add then 1-swap improvement; returns chosen indices + per-piece assignment */
+function chooseGlasses(lab, wt, n, cat, K, kL) {
+  const G = cat.length, d = new Float32Array(n * G);
+  for (let r = 0; r < n; r++) for (let g = 0; g < G; g++) d[r * G + g] = de00(lab[r * 3], lab[r * 3 + 1], lab[r * 3 + 2], cat[g].lab[0], cat[g].lab[1], cat[g].lab[2], kL);
+  let W = 0; for (let r = 0; r < n; r++) W += wt[r];
+  const cost = S => { let c = 0; for (let r = 0; r < n; r++) { let m = Infinity; for (const g of S) if (d[r * G + g] < m) m = d[r * G + g]; c += wt[r] * m; } return c; };
+  const S = [], best = new Float64Array(n).fill(60);
+  while (S.length < Math.min(K, G)) { let bg = -1, bv = 0; for (let g = 0; g < G; g++) { if (S.includes(g)) continue; let v = 0; for (let r = 0; r < n; r++) { const x = best[r] - d[r * G + g]; if (x > 0) v += wt[r] * x; } if (v > bv) { bv = v; bg = g; } }
+    if (bg < 0 || (S.length >= 2 && bv / W < 0.12)) break; // another sheet would improve the average match by < 0.12 ΔE00: not worth buying
+    S.push(bg); for (let r = 0; r < n; r++) if (d[r * G + bg] < best[r]) best[r] = d[r * G + bg]; }
+  let cur = cost(S);
+  for (let round = 0; round < 3; round++) { let improved = false;
+    for (let i = 0; i < S.length; i++) { let bg = -1, bc = cur; for (let g = 0; g < G; g++) { if (S.includes(g)) continue; const T = S.slice(); T[i] = g; const c = cost(T); if (c < bc - 1e-6) { bc = c; bg = g; } } if (bg >= 0) { S[i] = bg; cur = bc; improved = true; } }
+    if (!improved) break; }
+  const as = new Int32Array(n), dE = new Float32Array(n); for (let r = 0; r < n; r++) { let m = Infinity, b = 0; for (let i = 0; i < S.length; i++) { const v = d[r * G + S[i]]; if (v < m) { m = v; b = i; } } as[r] = b; dE[r] = m; }
+  return { S, as, dE, avg: cur / (W || 1) };
+}
+
 /* ---------- the tracer ---------- */
 /* img: {width,height,data RGBA} at working resolution (panel inner area). o: settings. env: {palette:[[name,r,g,b]...], line:{in,label}, frameGlass} */
 /* Cuttability limits by tool, from published stained-glass construction guidance (finished size, after the line allowance).
@@ -285,13 +347,13 @@ const MM2 = 1 / 645.16, MM = 1 / 25.4;
 const TOOLS = {
   // regular piece: smallest area / narrowest part; feature piece (eye, beak, window): smallest area / narrowest part; concave pieces below splitSolidity get a break line
   // hand: EZGlassPattern "won't cut (Beginner)" 196 mm² / 7 mm for every piece; features down to the general "won't cut" 100 mm² / 5 mm
-  hand:    { label: 'Hand cutting', minArea: 196 * MM2, minWidth: 7 * MM, featArea: 100 * MM2, featWidth: 5 * MM, splitSolidity: 0.6, deepFlag: 'deep-curve' },
+  hand:    { label: 'Hand cutting', minArea: 196 * MM2, minWidth: 7 * MM, featArea: 100 * MM2, featWidth: 5 * MM, splitSolidity: 0.6, deepFlag: 'deep-curve', curveIn: 0.19 },
   // grinder (default): EZGlassPattern general "won't cut" 100 mm² / 5 mm — anything bigger is cuttable (between 100 and 250 mm² it is "tricky");
   // features (eyes) down to 64 mm² (8×8 mm) / 4 mm: our extrapolation for grinder-shaped tiny pieces held with a grinder cookie/tongs
   // (everythingstainedglass.com/grinding-stained-glass describes grinding ~1 cm triangles this way)
-  grinder: { label: 'With grinder', minArea: 100 * MM2, minWidth: 5 * MM, featArea: 64 * MM2, featWidth: 4 * MM, splitSolidity: 0.42, deepFlag: 'grind' },
+  grinder: { label: 'With grinder', minArea: 100 * MM2, minWidth: 5 * MM, featArea: 64 * MM2, featWidth: 4 * MM, splitSolidity: 0.42, deepFlag: 'grind', curveIn: 0.125 },
   // ring saw: cuts any curve (Delphi ring-saw lesson); size limits below the hand/grinder ones are our extrapolation (64 mm² / 4 mm, features 36 mm² / 3 mm)
-  ringsaw: { label: 'Ring saw', minArea: 64 * MM2, minWidth: 4 * MM, featArea: 36 * MM2, featWidth: 3 * MM, splitSolidity: 0.25, deepFlag: 'saw' },
+  ringsaw: { label: 'Ring saw', minArea: 64 * MM2, minWidth: 4 * MM, featArea: 36 * MM2, featWidth: 3 * MM, splitSolidity: 0.25, deepFlag: 'saw', curveIn: 0.07 },
 };
 const LINE_ALLOW = { foil116: 1 / 32, foil18: 1 / 32, came316: 5 / 64, came14: 5 / 64 }; // inches removed per line by pattern shears (Delphi KB 10)
 function rules(o, innerAreaIn) {
@@ -304,12 +366,14 @@ function rules(o, innerAreaIn) {
   // Detail sets the piece count; the tool sets the physical floor (a bigger panel therefore keeps more detail). Pieces are measured after the line allowance.
   const minAreaIn = r2(Math.max(tool.minArea, Math.min(1.5, (innerAreaIn || 80) / (target * (TU.fill ?? 3)))));
   return { det, target, tool: o.tool in TOOLS ? o.tool : 'grinder', toolLabel: tool.label, minAreaIn, featAreaIn: r2(tool.featArea), minWidthIn: r2(Math.max(tool.minWidth, Math.min(0.42, 0.45 * Math.sqrt(minAreaIn)))), featWidthIn: r2(tool.featWidth),
-    maxAreaIn: 36, splitSolidity: tool.splitSolidity, deepFlag: tool.deepFlag, allowIn: allow, colors: Math.max(4, Math.min(24, Math.round(+o.tcolors || 12))) };
+    maxAreaIn: 36, curveIn: tool.curveIn, splitSolidity: tool.splitSolidity, deepFlag: tool.deepFlag, allowIn: allow, colors: Math.max(4, Math.min(24, Math.round(+o.tcolors || 12))) };
 }
 function trace(img, o, env) {
   const TU = o._tune || {}, T = { start: now() }, tick = k => { T[k] = Math.round(now() - T.start); };
   const iw = img.width, ih = img.height, N = iw * ih, F = img.data, widthIn = +o.widthIn || 12;
   const f = Math.max(0, Math.round(img.f || 0)), W = iw + 2 * f, H = ih + 2 * f, ppi = W / widthIn, notes = [], ru = rules(o, N / ppi / ppi);
+  const CAT = env.catalog && env.catalog.length ? env.catalog.map(c => ({ code: c[0], name: c[1], fam: c[2], rgb: [c[3], c[4], c[5]], streak: c[6] || null, lab: rgbLab(c[3], c[4], c[5]) }))
+    .concat((env.user || []).map((u, i) => ({ code: 'MY-' + (i + 1), name: u[0], fam: 'M', rgb: [u[1], u[2], u[3]], streak: null, lab: rgbLab(u[1], u[2], u[3]) }))) : null;
   const minA = ru.minAreaIn * ppi * ppi, featA = ru.featAreaIn * ppi * ppi, maxA = ru.maxAreaIn * ppi * ppi, minW = (ru.minWidthIn + ru.allowIn) * ppi; // width is checked on the drawn piece, so the line allowance is added
   // 1 the duplicate: photo → Lab (alpha over white); the original image is never touched
   const A0 = new Float32Array(N * 3); for (let p = 0; p < N; p++) { const a = F[p * 4 + 3] / 255; const c = rgbLab(Math.round(F[p * 4] * a + 255 * (1 - a)), Math.round(F[p * 4 + 1] * a + 255 * (1 - a)), Math.round(F[p * 4 + 2] * a + 255 * (1 - a))); A0[p * 3] = c[0]; A0[p * 3 + 1] = c[1]; A0[p * 3 + 2] = c[2]; }
@@ -354,32 +418,41 @@ function trace(img, o, env) {
     rl = relabel(R, iw, ih, x => feat[x]); R = rl.R; n = rl.n; feat = rl.feat; }
  
   // glass palette: k-means over the pieces' real mean colours (area-weighted) → the N glass colours you buy
-  const palette = r => { const gg = graph(R, n, iw, ih, A, F, Eb), P = new Float32Array(n * 3), w = new Float32Array(n); for (let i = 0; i < n; i++) { w[i] = gg.area[i]; for (let c = 0; c < 3; c++) P[i * 3 + c] = gg.lab[i * 3 + c] / gg.area[i]; }
+  const palette = r => { const gg = graph(R, n, iw, ih, A, F, Eb), P = new Float32Array(n * 3), w = new Float32Array(n);
+    if (CAT) { const rc = robustColors(R, n, A0, F, N), wt = new Float64Array(n); for (let i = 0; i < n; i++) wt[i] = Math.pow(gg.area[i], 0.6) * (feat[i] ? 3 : 1);
+      const ch = chooseGlasses(rc.lab, wt, n, CAT, ru.colors, TU.kL ?? 1.15); return { gg, C: ch.S.map(i => CAT[i].lab), pal: Int32Array.from(ch.as), ch, rc }; } for (let i = 0; i < n; i++) { w[i] = gg.area[i]; for (let c = 0; c < 3; c++) P[i * 3 + c] = gg.lab[i * 3 + c] / gg.area[i]; }
     const k2 = kmeansPP(P, w.map(v => Math.sqrt(v)), ru.colors, TU.lloyd ?? 4, 3, true), pal = Int32Array.from(k2.as); return { gg, C: k2.C, pal }; };
   let pk = palette(); let pal = pk.pal;
   { // neighbours that got the same glass colour and meet without a strong photo edge become one piece (no needless lead lines)
     const gg = pk.gg, par = new Int32Array(n).map((_, i) => i), ar = Float64Array.from(gg.area), find = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
-    const pairs = []; for (let r = 0; r < n; r++) for (const [q, e] of gg.adj[r]) if (q > r && pal[q] === pal[r] && e[1] / e[0] < (TU.samePal ?? 0.3)) { let d = 0; for (let c = 0; c < 3; c++) d += (gg.lab[r * 3 + c] / gg.area[r] - gg.lab[q * 3 + c] / gg.area[q]) ** 2; if (Math.sqrt(d) < (TU.sameDE ?? 3)) pairs.push([e[1] / e[0], r, q]); } pairs.sort((a, b) => a[0] - b[0]);
-    for (const [, a, b] of pairs) { const x = find(a), y = find(b); if (x === y || ar[x] + ar[y] > maxA * 0.8) continue; par[y] = x; ar[x] += ar[y]; feat[x] = 0; }
+    const pairs = []; for (let r = 0; r < n; r++) for (const [q, e] of gg.adj[r]) if (q > r && pal[q] === pal[r] && e[1] / e[0] < (TU.samePal ?? 0.3)) { let d = 0; for (let c = 0; c < 3; c++) d += (gg.lab[r * 3 + c] / gg.area[r] - gg.lab[q * 3 + c] / gg.area[q]) ** 2; if (Math.sqrt(d) < (TU.sameDE ?? (CAT ? 8 : 3))) pairs.push([e[1] / e[0], r, q]); } pairs.sort((a, b) => a[0] - b[0]);
+    let alive = n; const floor = CAT ? Math.round(ru.target * (TU.tmul ?? 1) * (TU.keepK ?? 0.85)) : 0; // v0.3: same-glass merging never drops the count far below the Detail target
+    for (const [, a, b] of pairs) { if (alive <= floor) break; const x = find(a), y = find(b); if (x === y || ar[x] + ar[y] > maxA * 0.8) continue; par[y] = x; ar[x] += ar[y]; feat[x] = 0; alive--; }
     for (let p = 0; p < N; p++) R[p] = find(R[p]); const c2 = components(R, iw, ih), f2 = new Uint8Array(c2.n), p2 = new Int32Array(c2.n); for (let i = 0; i < c2.n; i++) { f2[i] = feat[c2.from[i]]; p2[i] = pal[c2.from[i]]; } R = c2.R; n = c2.n; feat = f2; pal = p2; }
   tick('palette'); T.nPal = n;
   // 5 cuttability: open every piece at the minimum width; split very concave or oversized pieces; bridge pieces that enclose another
   const protect = new Uint8Array(n); for (let i = 0; i < n; i++) if (feat[i]) protect[i] = 1;
   R = majority(R, iw, ih, 2, protect);
+  if (CAT && TU.smooth !== 0) { // v0.3: round outlines to the tool's inside-curve radius (Smooth curves: low / medium / high)
+    const rad = Math.max(2, Math.min(Math.round(minW * 0.7), Math.round(ru.curveIn * ppi * ({ low: 0.6, medium: 1, high: 1.45 }[o.smooth] ?? 1))));
+    R = modeSmooth(R, iw, ih, rad, protect, 2); const c2 = components(R, iw, ih); R = c2.R; n = c2.n; feat = Uint8Array.from(c2.from.map(x => feat[x])); pal = Int32Array.from(c2.from.map(x => pal[x])); T.smoothRad = rad; }
   let op = openPieces(R, iw, ih, minW * 0.5 * (TU.openK ?? 1), feat, A); { const c2 = components(op.R, iw, ih); R = c2.R; n = c2.n; feat = Uint8Array.from(c2.from.map(x => feat[x])); pal = Int32Array.from(c2.from.map(x => pal[x])); }
   let ab = absorb(R, n, iw, ih, A, F, Eb, feat, minA * 0.55, featA, pal); R = ab.R; n = ab.n; feat = ab.feat; pal = ab.pal; T.nOpen = n;
   for (let round = 0; round < 3; round++) { // concave (C/L-shaped) or oversized pieces get a straight cut
     const vec = traceRegions(R, n, iw, ih), gg = graph(R, n, iw, ih, A, F, Eb); let next = n, did = 0; const parent = [];
+    const md = CAT ? new Float32Array(n) : null; if (CAT) { const D = distToEdge(R, iw, ih); for (let p = 0; p < N; p++) if (D[p] > md[R[p]]) md[R[p]] = D[p]; }
     for (let r = 0; r < n; r++) { const ring = vec.rings[r] && vec.rings[r].length ? vec.rings[r].reduce((a, b) => b.length > a.length ? b : a) : null; if (!ring) continue;
       const pts = ring.map(v => [v % vec.VW, Math.floor(v / vec.VW)]), ha = Math.abs(ringArea(hull(pts))) || 1, sol = gg.area[r] / ha; let k = 1;
-      if (gg.area[r] > maxA) k = Math.ceil(gg.area[r] / (maxA * 0.75)); else if (sol < ru.splitSolidity && gg.area[r] > minA * 2.2) k = 2; // hand: break line through deep inside curves; grinder/saw: only extreme C-shapes
+      if (gg.area[r] > maxA) k = Math.ceil(gg.area[r] / (maxA * 0.75)); else if (sol < ru.splitSolidity && gg.area[r] > minA * 2.2) k = 2;
+      // v0.3: long thin pieces (length ≳ 10× width) snap in the hand or the grinder — break them across; strongly concave big pieces get a break line too
+      if (CAT && k === 1 && !feat[r]) { const wpx = Math.max(1, md[r] * 2), el = gg.area[r] / (wpx * wpx); if (el > (TU.elong ?? 10) && gg.area[r] > minA * 3) k = Math.min(4, Math.ceil(el / (TU.elong ?? 10) * 1.4)); else if (sol < 0.55 && gg.area[r] > minA * 5) k = 2; } // hand: break line through deep inside curves; grinder/saw: only extreme C-shapes
       if (k > 1) { const add = splitPiece(R, iw, ih, r, Math.min(k, 6), next); for (let j = 0; j < add; j++) parent.push(r); next += add; did++; } }
     if (!did) break; const pal2 = Int32Array.from([...pal, ...parent.map(r => pal[r])]), feat2 = Uint8Array.from([...feat, ...parent.map(() => 0)]);
     const c2 = components(R, iw, ih); R = c2.R; n = c2.n; pal = Int32Array.from(c2.from.map(x => pal2[x])); feat = Uint8Array.from(c2.from.map(x => feat2[x]));
     ab = absorb(R, n, iw, ih, A, F, Eb, feat, minA * 0.55, featA, pal); R = ab.R; n = ab.n; feat = ab.feat; pal = ab.pal; }
  
   let bridged = 0;
-  for (let round = 0; round < 3; round++) { // no piece may enclose another (a ring of glass cannot be cut): cut the outer piece on both sides of the inner one
+  const bridgeAll = absK => { for (let round = 0; round < 3; round++) { // no piece may enclose another (a ring of glass cannot be cut): cut the outer piece on both sides of the inner one
     const vec = traceRegions(R, n, iw, ih); let did = 0;
     for (let q = 0; q < n; q++) { if (!vec.rings[q] || vec.rings[q].length < 2) continue;
       // holes of q: non-q pixels inside q's bounding box not reachable from outside the box without crossing q
@@ -396,14 +469,21 @@ function trace(img, o, env) {
       did++; bridged++; }
     if (!did) break;
     { const c2 = components(R, iw, ih), cut = n + 1e6; for (let p = 0; p < N; p++) if (c2.from[c2.R[p]] === cut) c2.R[p] = -1; fillOrphans(c2.R, iw, ih); const cp = components(c2.R, iw, ih); R = cp.R; const fromOld = cp.from.map(x => c2.from[x]); n = cp.n; pal = Int32Array.from(fromOld.map(x => x === cut ? 0 : pal[x])); feat = Uint8Array.from(fromOld.map(x => x === cut ? 0 : feat[x])); }
-    ab = absorb(R, n, iw, ih, A, F, Eb, feat, minA * 0.4, featA, pal); R = ab.R; n = ab.n; feat = ab.feat; pal = ab.pal; }
+    ab = absorb(R, n, iw, ih, A, F, Eb, feat, minA * absK, featA, pal); R = ab.R; n = ab.n; feat = ab.feat; pal = ab.pal; } };
+  bridgeAll(0.4);
+  if (CAT) { // v0.3: a "feature" (eye, beak) only keeps its exemption if it is compact enough to cut — feature slivers narrower than the feature width are absorbed
+    const D = distToEdge(R, iw, ih), md = new Float32Array(n), fW = (ru.featWidthIn + ru.allowIn) * ppi; for (let p = 0; p < N; p++) if (D[p] > md[R[p]]) md[R[p]] = D[p];
+    for (let r = 0; r < n; r++) if (feat[r] && md[r] * 2 < fW) feat[r] = 0; }
+  if (CAT) for (let round = 0; round < 3; round++) { // v0.3 strict minimum: nothing under the tool's minimum area survives (feature pieces: the feature minimum)
+    ab = absorb(R, n, iw, ih, A, F, Eb, feat, minA, featA, pal); R = ab.R; n = ab.n; feat = ab.feat; pal = ab.pal; const b0 = bridged; bridgeAll(1); if (bridged === b0) break; }
   tick('cuttable');
   // final palette pass on the finished pieces (real mean colours), so legend counts are exact
   pk = palette(); pal = pk.pal; const gF = pk.gg;
   // palette display colour = area-weighted mean of the real photo pixels in that colour
   const K = pk.C.length, prgb = Array.from({ length: K }, () => [0, 0, 0, 0]); for (let r = 0; r < n; r++) { const k = pal[r]; for (let c = 0; c < 3; c++) prgb[k][c] += gF.rgb[r * 3 + c]; prgb[k][3] += gF.area[r]; }
-  const pcol = prgb.map(s => s[3] ? [s[0] / s[3], s[1] / s[3], s[2] / s[3]] : [128, 128, 128]);
-  const glassName = (() => { const used = new Map(); const pl = env.palette || [], cd = (a, b) => { const rm = (a[0] + b[0]) / 2, dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2]; return Math.sqrt((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db); };
+  const GI = CAT ? pk.ch.S.map(i => CAT[i]) : null;
+  const pcol = GI ? GI.map(g => g.rgb) : prgb.map(s => s[3] ? [s[0] / s[3], s[1] / s[3], s[2] / s[3]] : [128, 128, 128]);
+  const glassName = GI ? GI.map(g => g.name) : (() => { const used = new Map(); const pl = env.palette || [], cd = (a, b) => { const rm = (a[0] + b[0]) / 2, dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2]; return Math.sqrt((2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db); };
     const order = [...Array(K).keys()].sort((a, b) => prgb[b][3] - prgb[a][3]), names = new Array(K);
     for (const k of order) { let best = 'Glass ' + (k + 1), bd = Infinity; for (const p of pl) { const d = cd(pcol[k], [p[1], p[2], p[3]]); if (d < bd) { bd = d; best = p[0]; } } let ud = Infinity, ub = null; for (const u of env.user || []) { const d = cd(pcol[k], [u[1], u[2], u[3]]); if (d < ud) { ud = d; ub = u; } } if (ub && ud <= bd * 1.6 + 45) best = ub[0]; const c = (used.get(best) || 0) + 1; used.set(best, c); names[k] = c > 1 ? `${best} ${['', '', 'B', 'C', 'D', 'E', 'F'][c] || c}` : best; }
     return names; })();
@@ -451,11 +531,15 @@ function trace(img, o, env) {
     const areaIn = areaPx / ppi / ppi, wIn = bestD[r] * 2 / ppi, k = isF ? -1 : pal[r];
     if (!isF) { if (feat[r] && areaIn < ru.minAreaIn) flags.push('advanced'); else if (areaIn < ru.minAreaIn * 0.75) flags.push('small'); if (wIn - ru.allowIn < (feat[r] ? ru.featWidthIn || ru.minWidthIn : ru.minWidthIn) * 0.9) flags.push('narrow'); if (pa / ha < 0.6) flags.push(ru.deepFlag); if (rs.length > 1) flags.push('hole'); }
     const rgb = isF ? (fg ? [fg[1], fg[2], fg[3]] : pcol[dark]) : pcol[k], glass = isF ? (fg ? fg[0] : glassName[dark]) : glassName[k];
-    const src = isF ? rgb : [gF.rgb[r * 3] / gF.area[r], gF.rgb[r * 3 + 1] / gF.area[r], gF.rgb[r * 3 + 2] / gF.area[r]];
+    const src = isF ? rgb : GI ? [pk.rc.rgb[r * 3], pk.rc.rgb[r * 3 + 1], pk.rc.rgb[r * 3 + 2]] : [gF.rgb[r * 3] / gF.area[r], gF.rgb[r * 3 + 1] / gF.area[r], gF.rgb[r * 3 + 2] / gF.area[r]];
+    const gi = GI ? (isF ? (fg ? null : GI[dark]) : GI[k]) : null;
     const lp = best[r] >= 0 ? [best[r] % W + 0.5, Math.floor(best[r] / W) + 0.5] : outer[0];
-    pieces.push({ id: r, frame: isF, pal: k, rgb: rgb.map(Math.round), src: src.map(Math.round), glass, segs: rs.map(ringSegs), poly: rs.map(q => q.map(v => v.p)), label: lp.map(r2), font: r2(Math.max(4, Math.min(bestD[r] * 1.15, 0.3 * ppi))), areaIn: r2(areaIn), widthIn: r2(wIn), flags }); }
+    pieces.push({ id: r, frame: isF, pal: k, rgb: rgb.map(Math.round), src: src.map(Math.round), glass, segs: rs.map(ringSegs), poly: rs.map(q => q.map(v => v.p)), label: lp.map(r2), font: r2(Math.max(4, Math.min(bestD[r] * 1.15, 0.3 * ppi))), areaIn: r2(areaIn), widthIn: r2(wIn), flags,
+      ...(GI ? { code: gi ? gi.code : '', family: gi ? gi.fam : '', glassRGB: rgb.map(Math.round), streak: gi && gi.streak, feature: !isF && !!feat[r], dE: isF ? 0 : r2(pk.ch.dE[r]) } : {}) }); }
   pieces.sort((a, b) => (a.frame - b.frame) || Math.floor(a.label[1] / ppi) - Math.floor(b.label[1] / ppi) || a.label[0] - b.label[0]); pieces.forEach((p, j) => p.n = j + 1);
-  const leg = new Map(); for (const p of pieces) { const e = leg.get(p.glass) || { glass: p.glass, hex: hex(p.rgb), count: 0, areaIn: 0, pieces: [] }; e.count++; e.areaIn = r2(e.areaIn + p.areaIn); e.pieces.push(p.n); leg.set(p.glass, e); }
+  const leg = new Map(); for (const p of pieces) { const e = leg.get(p.glass) || { glass: p.glass, hex: hex(p.rgb), count: 0, areaIn: 0, pieces: [], ...(GI ? { code: p.code, family: p.family, streak: p.streak ? hex(p.streak) : null, _s: [0, 0, 0], _d: 0, _w: 0 } : {}) }; e.count++; e.areaIn = r2(e.areaIn + p.areaIn); e.pieces.push(p.n);
+    if (GI && !p.frame) { const w = p.areaIn; for (let c = 0; c < 3; c++) e._s[c] += p.src[c] * w; e._d += p.dE * w; e._w += w; } leg.set(p.glass, e); }
+  if (GI) for (const e of leg.values()) { e.srcHex = e._w ? hex(e._s.map(v => v / e._w)) : e.hex; e.dE = e._w ? r2(e._d / e._w) : 0; delete e._s; delete e._d; delete e._w; }
   const legend = [...leg.values()].sort((a, b) => b.areaIn - a.areaIn);
   const inner = pieces.filter(p => !p.frame), by = fl2 => inner.filter(p => p.flags.includes(fl2)).map(p => p.n), adv = by('advanced'), small = by('small'), narrow = by('narrow'), deep = by('deep-curve'), grind = by('grind'), saw = by('saw'), hole = by('hole'), reasons = [];
   const smallest = inner.length ? Math.min(...inner.map(p => p.areaIn)) : 0, list = a => a.length > 6 ? a.slice(0, 6).map(x => '#' + x).join(', ') + ` +${a.length - 6} more` : a.map(x => '#' + x).join(', ');
@@ -475,12 +559,12 @@ function trace(img, o, env) {
   const difficulty = pieces.length <= 110 && !deep.length && !narrow.length && !hole.length && adv.length <= 6 ? 'Beginner' : pieces.length > 220 ? 'Advanced' : 'Intermediate';
   tick('done');
   if (paint && paint.strokes) notes.push(`${paint.strokes} paint lines (fine detail such as eyes, fur, feathers, window bars and veins) are a painting guide inside the pieces — not cut lines. Trace them on the cut glass with glass paint, fire (or use no-kiln glass paint markers), then foil.`);
-  notes.push(`Traced from your photo: ${startRegions.toLocaleString()} colour zones found; the faithful trace keeps ${n0.toLocaleString()} regions; the cut pattern merges them into ${inner.length} pieces along the photo’s strongest edges; ${K} glass colours taken from the photo itself.${bridged ? ` ${bridged} enclosed piece${bridged > 1 ? 's' : ''} got a short extra cut line so nothing is a ring.` : ''}`);
+  notes.push(`Traced from your photo: ${startRegions.toLocaleString()} colour zones found; the faithful trace keeps ${n0.toLocaleString()} regions; the cut pattern merges them into ${inner.length} pieces along the photo’s strongest edges; ${GI ? `${K} glasses picked from the ${CAT.length}-glass catalog by CIEDE2000 (average match ΔE ${r2(pk.ch.avg)}).` : `${K} glass colours taken from the photo itself.`}${bridged ? ` ${bridged} enclosed piece${bridged > 1 ? 's' : ''} got a short extra cut line so nothing is a ring.` : ''}`);
   const outlineKept = eT ? Math.round(eK / eT * 100) : null;
-  return { kind: 'glass', version: 3, method: 'trace', engine: 'tracer-v7', f, crop: img.crop || [0, 0, 1, 1], widthIn: r2(widthIn), heightIn: r2(H / ppi), frameIn: r2(f / ppi), gridW: W, gridH: H, ppi, lineIn: env.line ? env.line.in : 1 / 16, lineLabel: env.line ? env.line.label : 'Copper foil — 1/16″ lines',
+  return { kind: 'glass', version: GI ? 4 : 3, method: 'trace', engine: GI ? 'gps-v0.3' : 'tracer-v7', match: GI ? { avgDE: r2(pk.ch.avg), glasses: K, catalog: CAT.length } : null, f, crop: img.crop || [0, 0, 1, 1], widthIn: r2(widthIn), heightIn: r2(H / ppi), frameIn: r2(f / ppi), gridW: W, gridH: H, ppi, lineIn: env.line ? env.line.in : 1 / 16, lineLabel: env.line ? env.line.label : 'Copper foil — 1/16″ lines',
     pieces, legend, notes, trace: faithful, paint, silhouette: [], detail: [], dots: [], shapes: [], overlay: [], subject: { how: 'off', frac: 1, outlineKept }, timing: T,
     stats: { outlineKept, advanced: adv.length, detailLines: 0, dots: 0, pieces: pieces.length, colors: legend.length, difficulty, reasons, smallestIn: r2(smallest), minAreaIn: ru.minAreaIn, minWidthIn: ru.minWidthIn, target: ru.target, flagged: { advanced: adv, small, narrow, deep, grind, saw, hole }, junctions4: j4, tool: ru.tool, toolLabel: ru.toolLabel, featAreaIn: ru.featAreaIn, allowIn: ru.allowIn }, settings: o };
 }
-root.PhotoTracer = { trace, rules };
+root.PhotoTracer = { trace, rules, de00, rgbLab, modeSmooth, robustColors, chooseGlasses };
 if (typeof module !== 'undefined' && module.exports) module.exports = root.PhotoTracer;
 })(typeof self !== 'undefined' ? self : this);

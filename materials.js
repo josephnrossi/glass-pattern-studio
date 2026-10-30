@@ -18,16 +18,16 @@ function glassMaterials(P, { sheet = '12x12', waste = 30, line = 'foil' } = {}) 
   const per = new Map(); let perim = 0;
   for (const p of P.pieces) {
     const L = (p.poly || []).reduce((a, r) => a + ringLen(r), 0) / ppi; perim += L;
-    const [bw, bh] = pieceBox(p).map(v => v / ppi), e = per.get(p.glass) || { glass: p.glass, hex: gHex(p.rgb), count: 0, areaIn: 0, big: [0, 0], bigN: 0, pieces: [], srcAcc: [0, 0, 0], srcW: 0 };
-    e.count++; e.areaIn += p.areaIn; e.pieces.push(p.n); if (bw * bh > e.big[0] * e.big[1]) { e.big = [bw, bh]; e.bigN = p.n; }
-    if (p.src && p.src.length === 3) { const w = Math.max(0.01, p.areaIn || 1); e.srcAcc[0] += p.src[0] * w; e.srcAcc[1] += p.src[1] * w; e.srcAcc[2] += p.src[2] * w; e.srcW += w; }
+    const [bw, bh] = pieceBox(p).map(v => v / ppi), e = per.get(p.glass) || { glass: p.glass, code: p.code || '', family: p.family || '', hex: gHex(p.rgb), count: 0, dEacc: 0, areaIn: 0, big: [0, 0], bigN: 0, pieces: [], srcAcc: [0, 0, 0], srcW: 0 };
+    e.count++; e.areaIn += p.areaIn; if (p.dE != null && !p.frame) e.dEacc += p.dE * p.areaIn; e.pieces.push(p.n); if (bw * bh > e.big[0] * e.big[1]) { e.big = [bw, bh]; e.bigN = p.n; }
+    if (p.src && p.src.length === 3 && !(p.frame && p.code)) { const w = Math.max(0.01, p.areaIn || 1); e.srcAcc[0] += p.src[0] * w; e.srcAcc[1] += p.src[1] * w; e.srcAcc[2] += p.src[2] * w; e.srcW += w; }
     per.set(p.glass, e);
   }
   const fits = (b) => (b[0] <= sh[1] && b[1] <= sh[2]) || (b[0] <= sh[2] && b[1] <= sh[1]);
   const colors = [...per.values()].sort((a, b) => b.areaIn - a.areaIn).map(e => {
     const buy = e.areaIn * (1 + w);
     const srcHex = e.srcW ? gHex([e.srcAcc[0] / e.srcW, e.srcAcc[1] / e.srcW, e.srcAcc[2] / e.srcW]) : null;
-    const { srcAcc, srcW, ...rest } = e;
+    const { srcAcc, srcW, dEacc, ...rest } = e; rest.dE = e.srcW && e.code ? Math.round(dEacc / e.srcW * 10) / 10 : null;
     return { ...rest, srcHex, areaIn: e.areaIn, buyIn: buy, sheets: Math.max(1, Math.ceil(buy / sheetA - 1e-9)), scrap: buy < sheetA / 12, bigFrame: !!(P.pieces.find(p => p.n === e.bigN) || {}).frame, fits: fits(e.big) };
   });
   const area = colors.reduce((a, c) => a + c.areaIn, 0), border = 2 * (P.widthIn + P.heightIn);

@@ -9,6 +9,7 @@ const PLAN = {
   cat: { size: [12, 12], crop: [0.12, 0.06, 0.8, 0.6655], detail: 7, views: ['color', 'paint'] },
   tulip: { size: [12, 16], crop: [0.31, 0.06, 0.4, 0.8], detail: 4, tool: 'hand', views: ['color', 'cut'] },
 };
+const WK = process.env.BROWSER === 'chromium' ? chromium : webkit; // BROWSER=chromium where WebKit can't launch
 const errors = [];
 async function run(devName, type, ctxOpt, samples) {
   const br = await type.launch(), ctx = await br.newContext({ ...ctxOpt, serviceWorkers: 'block', acceptDownloads: true }), page = await ctx.newPage();
@@ -42,9 +43,9 @@ async function run(devName, type, ctxOpt, samples) {
   await br.close();
 }
 (async () => {
-  await run('iphone15', webkit, devices['iPhone 15'], ['bird', 'house', 'cat', 'tulip']);
+  await run('iphone15', WK, devices['iPhone 15'], ['bird', 'house', 'cat', 'tulip']);
   await run('pixel7', chromium, devices['Pixel 7'], ['bird', 'tulip']);
-  await run('iphone15-dark', webkit, { ...devices['iPhone 15'], colorScheme: 'dark' }, ['cat']);
+  await run('iphone15-dark', WK, { ...devices['iPhone 15'], colorScheme: 'dark' }, ['cat']);
   // PDF pages → PNG
   const r = (f, pg, out, res = 45) => fs.existsSync(path.join(DL, f)) && execSync(`pdftoppm -r ${res} -png -f ${pg} -l ${pg} -singlefile ${path.join(DL, f)} ${path.join(SH, out)}`);
   r('bird-full.pdf', 1, 'mock-pdf-bird-fullsize-cover'); r('bird-full.pdf', 2, 'mock-pdf-bird-fullsize-A1'); r('bird-paint.pdf', 2, 'mock-pdf-bird-paintguide-A1'); r('bird-sheet.pdf', 1, 'mock-pdf-bird-cutsheet'); r('bird-sheet.pdf', 2, 'mock-pdf-bird-cutlist');

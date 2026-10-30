@@ -21,7 +21,7 @@ function checkSquare(p, x, y) { // x,y = bottom-left in pt
 function pdfFooter(p, PW, txt, n, N) { p.text(PM.side, p.h - 22, 8, `${txt} · page ${n} of ${N}`, false, [90, 90, 90]); }
 function glassFullPDF(P, { paper = 'letter', kind = 'cut', name = 'Pattern' } = {}) {
   const L = tileLayout(P, paper), doc = new PDFDoc(), lw = P.lineIn * P.ppi, cut = kind !== 'color', pm = P.paint && P.paint.lines.length ? (kind === 'paint' ? 'guide' : kind === 'color' ? 'color' : '') : '';
-  const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], N = 1 + L.n, title = kind === 'paint' ? 'Paint guide — full size' : kind === 'color' ? 'Color pattern — full size' : 'Cut pattern — full size';
+  const keyPage = !!(P.legend && P.legend.length), lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], N = 1 + L.n + (keyPage ? 1 : 0), title = kind === 'paint' ? 'Paint guide — full size' : kind === 'color' ? 'Color pattern — full size' : 'Cut pattern — full size';
   // cover
   const c = doc.page(L.PW, L.PH); let y = PM.top;
   c.text(PM.side, y, 18, `${name} — ${title}`, true); y += 26;
@@ -39,14 +39,24 @@ function glassFullPDF(P, { paper = 'letter', kind = 'cut', name = 'Pattern' } = 
     'Numbers match the cut sheet and glass list — write each number on the back of its glass piece.'];
   for (const t of steps) y = c.para(PM.side, y, mapW, 9.5, '• ' + t) + 2;
   checkSquare(c, L.PW - PM.side - 150, 30); pdfFooter(c, L.PW, `Glass Pattern Studio · ${name} · ${title} · cover`, 1, N);
-  // tiles
+  // v0.3 colour key: which glass each numbered piece is cut from (code + name + family + piece numbers)
   let pg = 2;
+  if (keyPage) { const k = doc.page(L.PW, L.PH), FAM = { C: 'Cathedral', O: 'Opalescent', S: 'Streaky', M: 'Your glass' }; let ky = PM.top;
+    k.text(PM.side, ky, 16, 'Color key — glass for each numbered piece', true); ky += 22;
+    k.text(PM.side, ky, 9, 'Write the number (and the glass code) on the back of every glass piece as you cut it.', false, [80, 80, 80]); ky += 18;
+    for (const e of P.legend) { if (ky > L.PH - PM.bottom - 10) break; const rgb = [1, 3, 5].map(i => parseInt(e.hex.slice(i, i + 2), 16));
+      k.fill(...rgb).stroke(60, 60, 60).lw(0.6).rect(PM.side, L.PH - ky - 20, 26, 20, 'B');
+      k.text(PM.side + 34, ky, 11, `${e.code ? e.code + '  ' : ''}${e.glass}${e.family ? ' · ' + (FAM[e.family] || '') : ''}`, true);
+      k.text(PM.side + 34, ky + 13, 8.5, `${e.count} piece${e.count === 1 ? '' : 's'} · ${e.areaIn.toFixed(1)} sq in${e.dE != null && e.code ? ` · color match dE ${e.dE} (CIEDE2000)` : ''}`, false, [70, 70, 70]);
+      ky = k.para(PM.side + 34, ky + 25, L.PW - 2 * PM.side - 34, 8, 'Pieces ' + e.pieces.join(', '), false, [90, 90, 90]) + 8; }
+    pdfFooter(k, L.PW, `Glass Pattern Studio · ${name} · color key`, pg++, N); }
   for (let r = 0; r < L.rows; r++) for (let q = 0; q < L.cols; q++) {
     const p = doc.page(L.PW, L.PH), x0 = q * L.sx, y0 = r * L.sy, sc = 72 / P.ppi, Lx = PM.side, Ty = L.PH - PM.top, Wt = L.tw * 72, Ht = L.th * 72;
     p.op('q').op(`${f2(Lx)} ${f2(Ty - Ht)} ${f2(Wt)} ${f2(Ht)} re W n`);
     p.op(`${f2(sc)} 0 0 ${f2(-sc)} ${f2(Lx - x0 * 72)} ${f2(Ty + y0 * 72)} cm`); drawPieces(p, P, cut, lw, pm); p.op('Q');
     p.op('q').op(`${f2(Lx)} ${f2(Ty - Ht)} ${f2(Wt)} ${f2(Ht)} re W n`);
-    for (const pc of P.pieces) { const px = Lx + (pc.label[0] / P.ppi - x0) * 72, py = Ty - (pc.label[1] / P.ppi - y0) * 72, fs = Math.max(6, Math.min(14, pc.font * sc)); if (px < Lx - 20 || px > Lx + Wt + 20 || py < Ty - Ht - 20 || py > Ty + 20) continue; const t = String(pc.n), w = t.length * fs * 0.55; p.textAt(px - w / 2, py - fs * 0.35, fs, t, true, cut || lum(pc.rgb) > 140 ? [0, 0, 0] : [255, 255, 255]); }
+    for (const pc of P.pieces) { const px = Lx + (pc.label[0] / P.ppi - x0) * 72, py = Ty - (pc.label[1] / P.ppi - y0) * 72, fs = Math.max(6, Math.min(14, pc.font * sc)); if (px < Lx - 20 || px > Lx + Wt + 20 || py < Ty - Ht - 20 || py > Ty + 20) continue; const t = String(pc.n), w = t.length * fs * 0.55; p.textAt(px - w / 2, py - fs * 0.35, fs, t, true, cut || lum(pc.rgb) > 140 ? [0, 0, 0] : [255, 255, 255]);
+      if (cut && pc.code && pc.font * sc >= 7) { const f2s = Math.max(4.5, fs * 0.5); p.textAt(px - pc.code.length * f2s * 0.28, py - fs * 0.35 - f2s * 1.25, f2s, pc.code, false, [110, 110, 110]); } }
     // overlap strips (dashed) + ⊕ marks
     p.stroke(220, 0, 0).lw(0.6).op('[3 3] 0 d');
     const PX = X => Lx + (X - x0) * 72, PY = Y => Ty - (Y - y0) * 72;
@@ -86,7 +96,7 @@ function glassCutSheetPDF(P, M, { paper = 'letter', name = 'Pattern' } = {}) {
   for (const e of M.colors) {
     if (y > PH - 80) { page = doc.page(PW, PH); y = PM.top; pg++; }
     const rgb = [1, 3, 5].map(i => parseInt(e.hex.slice(i, i + 2), 16)); page.fill(...rgb).stroke(80, 80, 80).lw(0.5).rect(PM.side, PH - y - 14, 18, 14, 'B');
-    page.text(PM.side + 26, y, 11, `${e.glass} — ${e.count} piece${e.count === 1 ? '' : 's'}, ${e.areaIn.toFixed(1)} sq in (${e.scrap ? 'a scrap piece is enough' : `buy ${e.sheets} × ${M.sheet[0].replace('cm', ' cm')} sheet${e.sheets === 1 ? '' : 's'}`})`, true); y += 16;
+    page.text(PM.side + 26, y, 11, `${e.code ? e.code + ' ' : ''}${e.glass} — ${e.count} piece${e.count === 1 ? '' : 's'}, ${e.areaIn.toFixed(1)} sq in (${e.scrap ? 'a scrap piece is enough' : `buy ${e.sheets} × ${M.sheet[0].replace('cm', ' cm')} sheet${e.sheets === 1 ? '' : 's'}`})`, true); y += 16;
     y = page.para(PM.side + 26, y, PW - 2 * PM.side - 26, 9, e.pieces.map(n => '#' + n + (flag.has(n) ? '*' : '')).join('  '), false, [40, 40, 40]) + 8;
   }
   doc.pages.forEach((p, i) => { if (i) pdfFooter(p, PW, `Glass Pattern Studio · ${name} · cut list`, i + 1, doc.pages.length); });
@@ -97,10 +107,26 @@ function fmtLen(inches, cm) { return cm ? (inches * 2.54 / 100).toFixed(1) + ' m
 function fmtArea(sqin, cm) { return cm ? Math.round(sqin * 6.4516).toLocaleString() + ' cm²' : sqin.toFixed(1) + ' sq in'; }
 function shoppingListText(P, M, { name = 'Pattern', cm = false } = {}) {
   const l = [`${name} — stained glass shopping list`, `${P.widthIn} × ${P.heightIn} in panel · ${P.stats.pieces} pieces`, '', `GLASS (${M.sheet[0].replace('cm', ' cm')} sheets, +${M.waste}% for waste):`];
-  for (const c of M.colors) l.push(`• ${c.glass}: ${c.scrap ? 'scrap piece' : c.sheets + ' sheet' + (c.sheets === 1 ? '' : 's')} (${fmtArea(c.areaIn, cm)} in ${c.count} piece${c.count === 1 ? '' : 's'})${c.scrap ? ' — offcuts will do' : ''}${c.fits ? '' : ' — largest piece is bigger than one sheet: buy a bigger sheet'}`);
+  for (const c of M.colors) l.push(`• ${c.code ? c.code + ' ' : ''}${c.glass}${c.family ? ` (${({ C: 'cathedral', O: 'opalescent', S: 'streaky' })[c.family] || 'your glass'})` : ''}: ${c.scrap ? 'scrap piece' : c.sheets + ' sheet' + (c.sheets === 1 ? '' : 's')} (${fmtArea(c.areaIn, cm)} in ${c.count} piece${c.count === 1 ? '' : 's'})${c.scrap ? ' — offcuts will do' : ''}${c.fits ? '' : ' — largest piece is bigger than one sheet: buy a bigger sheet'}`);
   l.push('');
   if (M.line === 'came') l.push(`LEAD CAME: ${fmtLen(M.came.innerIn, cm)} of H came inside (${M.came.innerStrips} × 6 ft strips) + ${fmtLen(M.came.borderIn, cm)} border U came or zinc (${M.came.borderStrips} strips), incl. 15% extra.`, 'Also: lead knife, horseshoe nails, 60/40 or 50/50 solder, flux, cement.');
   else l.push(`COPPER FOIL: ${fmtLen(M.foil.in, cm)} incl. 10% extra — ${M.foil.rolls} roll${M.foil.rolls === 1 ? '' : 's'} of ${M.foil.width} foil (36 yd each).`, 'Also: 60/40 solder, flux, burnisher; patina optional.');
   l.push('', 'Estimates only — buy all of one color from the same batch so it matches.', 'Made with Glass Pattern Studio');
   return l.join('\n');
+}
+/* v0.3 SVG export: the real-size pattern (glass fills, lead lines at their true width, numbered pieces, data-code per piece)
+   plus a color key strip BELOW the panel — the panel itself stays at exact scale (1 in = 1 in), the key only adds height. */
+function patternExportSVG(P, { key = true } = {}) {
+  const inner = glassSVG(P, { cut: false, numbers: true }).replace(/^<svg [^>]*>/, m => m.replace(/width="[^"]+in" height="[^"]+in"/, `x="0" y="0" width="${P.gridW}" height="${P.gridH}"`));
+  if (!key || !(P.legend && P.legend.length)) return inner;
+  const u = P.ppi, fs = 0.16 * u, rowH = 0.42 * u, cols = P.widthIn >= 14 ? 3 : P.widthIn >= 9 ? 2 : 1, colW = P.gridW / cols, rows = Math.ceil(P.legend.length / cols), pad = 0.25 * u, keyH = pad * 2 + 0.3 * u + rows * rowH;
+  const FAM = { C: 'cathedral', O: 'opalescent', S: 'streaky', M: 'your glass' }, x = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+  const items = P.legend.map((e, i) => { const cx = (i % cols) * colW + pad, cy = P.gridH + pad + 0.3 * u + Math.floor(i / cols) * rowH, nums = e.pieces.length > 14 ? e.pieces.slice(0, 14).join(', ') + ' …' : e.pieces.join(', ');
+    return `<g><rect x="${+cx.toFixed(1)}" y="${+cy.toFixed(1)}" width="${+(0.36 * u).toFixed(1)}" height="${+(0.3 * u).toFixed(1)}" fill="${e.hex}" stroke="#333" stroke-width="${+(0.01 * u).toFixed(2)}"/><text x="${+(cx + 0.46 * u).toFixed(1)}" y="${+(cy + fs * 0.9).toFixed(1)}" font-size="${+fs.toFixed(1)}" font-weight="700">${x((e.code ? e.code + ' ' : '') + e.glass)}<tspan font-weight="400" fill="#555"> · ${e.count} pc · ${e.areaIn.toFixed(1)} sq in${e.family ? ' · ' + (FAM[e.family] || '') : ''}</tspan></text><text x="${+(cx + 0.46 * u).toFixed(1)}" y="${+(cy + fs * 2).toFixed(1)}" font-size="${+(fs * 0.75).toFixed(1)}" fill="#666">#${x(nums)}</text></g>`; }).join('');
+  const H = P.gridH + keyH;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${P.widthIn}in" height="${+(H / u).toFixed(3)}in" viewBox="0 0 ${P.gridW} ${+H.toFixed(1)}" data-ppi="${P.ppi}">
+<desc>Glass Pattern Studio ${P.widthIn}×${P.heightIn} in pattern, ${P.stats.pieces} pieces, ${P.legend.length} glasses. Panel at real size (top); color key below the panel.</desc>
+${inner}
+<g id="key" font-family="Helvetica, Arial, sans-serif"><rect x="0" y="${P.gridH}" width="${P.gridW}" height="${+keyH.toFixed(1)}" fill="#fff"/><text x="${+pad.toFixed(1)}" y="${+(P.gridH + pad + fs).toFixed(1)}" font-size="${+(fs * 1.1).toFixed(1)}" font-weight="700">Color key</text>${items}</g>
+</svg>`;
 }
